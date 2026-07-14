@@ -88,7 +88,14 @@ def _require_enabled_workflow(
             f"'{_escape_markup(workflow_id)}' is corrupted"
         )
         raise typer.Exit(1)
-    if isinstance(metadata, dict) and not metadata.get("enabled", True):
+    enabled = metadata.get("enabled", True) if isinstance(metadata, dict) else True
+    if not isinstance(enabled, bool):
+        out.print(
+            f"[red]Error:[/red] Registry entry for "
+            f"'{_escape_markup(workflow_id)}' is corrupted"
+        )
+        raise typer.Exit(1)
+    if isinstance(metadata, dict) and not enabled:
         out.print(
             f"[red]Error:[/red] Workflow '{_escape_markup(workflow_id)}' is disabled. "
             f"Enable with: specify workflow enable {_escape_markup(workflow_id)}"
@@ -260,9 +267,13 @@ def _resolve_installed_workflow_ownership(
     Returns ``(None, None)`` when neither applies -- a genuinely standalone
     external workflow file, which is allowed to run unchecked.
     """
-    def ownership_for(candidate: Path) -> tuple[Path, str] | None:
+    def ownership_for(
+        candidate: Path, search_end: int | None = None
+    ) -> tuple[Path, str] | None:
         parts = candidate.parts
-        i = _scan_for_workflow_owner(parts)
+        i = _scan_for_workflow_owner(
+            parts if search_end is None else parts[:search_end]
+        )
         if i is None:
             return None
         registry_root = (
@@ -316,7 +327,7 @@ def _resolve_installed_workflow_ownership(
             except OSError:
                 continue
         if registered_id is None:
-            return None
+            return ownership_for(candidate, i)
         # A legitimately installed workflow's own directory tree never
         # contains a symlink (workflow add/remove both refuse one at
         # install time); one appearing here means the file actually loaded

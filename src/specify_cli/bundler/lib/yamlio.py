@@ -97,12 +97,20 @@ def dump_json(path: Path, data: Any, *, within: Path | None = None) -> Path:
     temp_path: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        target_exists = path.exists()
         fd, temp_name = tempfile.mkstemp(
             dir=path.parent,
             prefix=f".{path.name}.",
             suffix=".tmp",
         )
         temp_path = Path(temp_name)
+        if not target_exists:
+            os.close(fd)
+            fd = -1
+            temp_path.unlink()
+            flags = os.O_RDWR | os.O_CREAT | os.O_EXCL
+            flags |= getattr(os, "O_NOFOLLOW", 0)
+            fd = os.open(temp_path, flags, 0o666)
         with os.fdopen(os.dup(fd), "w", encoding="utf-8") as handle:
             json.dump(data, handle, indent=2, sort_keys=False)
             handle.write("\n")

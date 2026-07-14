@@ -10393,8 +10393,8 @@ steps:
         assert "All checked workflows are up to date" in result.output
         assert "skipped" in result.output
 
-    def test_run_refuses_falsy_non_bool_enabled(self, project_dir, monkeypatch):
-        """A falsy non-bool "enabled" (0) shows as disabled in list — run must agree."""
+    def test_run_rejects_falsy_non_bool_enabled(self, project_dir, monkeypatch):
+        """A non-boolean enabled value is corrupted registry metadata."""
         import json as json_mod
 
         from typer.testing import CliRunner
@@ -10411,7 +10411,7 @@ steps:
 
         result = runner.invoke(app, ["workflow", "run", "align-wf"])
         assert result.exit_code != 0
-        assert "disabled" in result.output
+        assert "corrupted" in result.output
 
     def test_update_installs_newer_catalog_version(self, project_dir, monkeypatch):
         from unittest.mock import patch
@@ -11457,6 +11457,25 @@ steps:
         assert result.exit_code != 0
         assert "corrupted" in result.output
 
+    def test_run_rejects_non_boolean_enabled_metadata(
+        self, project_dir, monkeypatch
+    ):
+        from typer.testing import CliRunner
+        from specify_cli import app
+        from specify_cli.workflows.catalog import WorkflowRegistry
+
+        monkeypatch.chdir(project_dir)
+        runner = CliRunner()
+        self._install_dev(runner, app, project_dir)
+
+        registry = WorkflowRegistry(project_dir)
+        registry.data["workflows"]["align-wf"]["enabled"] = "false"
+        registry.save()
+
+        result = runner.invoke(app, ["workflow", "run", "align-wf"])
+        assert result.exit_code != 0
+        assert "corrupted" in result.output
+
     def test_run_rejects_corrupt_registry_file(self, project_dir, monkeypatch):
         from typer.testing import CliRunner
         from specify_cli import app
@@ -11724,6 +11743,56 @@ steps:
         # the true (nearest) owner must actually block this exact path.
         _write_registry(inner_workflows, "inner-wf", enabled=False)
         result = runner.invoke(app, ["workflow", "run", str(target)])
+        assert result.exit_code != 0
+        assert "disabled" in result.output
+
+    def test_run_nested_unregistered_marker_falls_back_to_registered_owner(
+        self, temp_dir, monkeypatch
+    ):
+        """An unregistered inner marker must not hide a disabled outer owner."""
+        from typer.testing import CliRunner
+        from specify_cli import app
+
+        outer_workflows = temp_dir / "outer-proj" / ".specify" / "workflows"
+        outer_wf_dir = outer_workflows / "outer-wf"
+        outer_wf_dir.mkdir(parents=True)
+        (outer_workflows / "workflow-registry.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": "1.0",
+                    "workflows": {
+                        "outer-wf": {
+                            "name": "outer-wf",
+                            "version": "1.0.0",
+                            "source": "dev",
+                            "enabled": False,
+                        }
+                    },
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        nested_workflow = (
+            outer_wf_dir
+            / "nested-proj"
+            / ".specify"
+            / "workflows"
+            / "unregistered"
+            / "workflow.yml"
+        )
+        nested_workflow.parent.mkdir(parents=True)
+        nested_workflow.write_text(
+            self.WORKFLOW_YAML.format(version="1.0.0"), encoding="utf-8"
+        )
+
+        unrelated_cwd = temp_dir / "unrelated-cwd"
+        unrelated_cwd.mkdir()
+        monkeypatch.chdir(unrelated_cwd)
+
+        result = CliRunner().invoke(
+            app, ["workflow", "run", str(nested_workflow)]
+        )
         assert result.exit_code != 0
         assert "disabled" in result.output
 

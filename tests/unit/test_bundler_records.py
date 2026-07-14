@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -38,6 +40,20 @@ def test_save_and_load_roundtrip(tmp_path: Path):
         ("presets", "p1"),
         ("steps", "s1"),
     }
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX mode semantics")
+def test_save_records_new_file_uses_process_umask(tmp_path: Path):
+    (tmp_path / ".specify").mkdir()
+
+    previous_umask = os.umask(0o022)
+    try:
+        save_records(tmp_path, [])
+    finally:
+        os.umask(previous_umask)
+
+    mode = stat.S_IMODE(records_path(tmp_path).stat().st_mode)
+    assert mode == 0o644
 
 
 def test_load_missing_file_returns_empty(tmp_path: Path):
